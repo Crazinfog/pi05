@@ -1,0 +1,459 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ECO65 三维示教</title>
+<style>
+  /* 苹方 + 旧金山字体（从 Mac 系统字体转出来的，自用）：Linux 上的 Firefox 也是这个字 */
+  @font-face { font-family: "UI Sans"; src: url(./fonts/SFNS.woff2) format("woff2"); font-weight: 100 900; unicode-range: U+0000-024F, U+2000-206F, U+20AC, U+2190-21FF, U+2212; }
+  @font-face { font-family: "UI Sans"; src: url(./fonts/PingFangSC-Regular.woff2) format("woff2"); font-weight: 400; }
+  @font-face { font-family: "UI Sans"; src: url(./fonts/PingFangSC-Medium.woff2) format("woff2"); font-weight: 500; }
+  @font-face { font-family: "UI Sans"; src: url(./fonts/PingFangSC-Semibold.woff2) format("woff2"); font-weight: 600 700; }
+  /* 2026-11-02 按苹果官网的风格重做：浅灰底 + 白色大圆角卡片、不用重阴影；胶囊按钮；单选改成分段控件、勾选框改成开关；
+     长说明默认收进“说明”里（app.js 的 layout 包起来）。颜色取苹果官网：正文 #1d1d1f、次要 #6e6e73、按钮蓝 #0071e3 */
+  :root {
+    --bg: #f5f5f7; --card: #ffffff; --text: #1d1d1f; --muted: #6e6e73; --faint: #86868b; --line: #d2d2d7; --hair: rgba(0,0,0,.08);
+    --fill: #e8e8ed; --fill-hover: #dcdce2; --row: #f5f5f7; --row-hover: #ececf0;
+    --accent: #0071e3; --accent-hover: #0077ed; --link: #0066cc; --accent-soft: rgba(0,113,227,.1);
+    --ok: #1d8a3a; --bad: #e30000; --bad-soft: rgba(255,59,48,.1); --warn: #b64400; --green: #34c759;
+    --radius: 18px; --radius-s: 12px;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+               font: 14px/1.47 "UI Sans", -apple-system, "PingFang SC", "Noto Sans CJK SC", sans-serif;
+               -webkit-font-smoothing: antialiased; letter-spacing: -.01em; }
+  #app { display: flex; height: 100%; }
+  #view { flex: 1; position: relative; min-width: 0; }
+  #view canvas { display: block; }
+
+  /* 三维视图上的浮层：毛玻璃 */
+  #hud, #help { position: absolute; left: 16px; background: rgba(250,250,252,.78);
+                backdrop-filter: blur(20px) saturate(180%); -webkit-backdrop-filter: blur(20px) saturate(180%);
+                border-radius: var(--radius-s); box-shadow: 0 0 0 .5px rgba(0,0,0,.08), 0 6px 24px rgba(0,0,0,.06); }
+  #hud { top: 16px; padding: 10px 14px; max-width: 520px; pointer-events: none; }
+  #winctl { position: absolute; top: 16px; right: 16px; display: flex; gap: 6px; }
+  #winctl[hidden] { display: none; }
+  /* 带 hidden 的一律不显示：.recask 这类写了 display 的规则会盖掉 hidden，原来“成功了吗”那一栏一直显示着、没东西可标时也能点 */
+  [hidden] { display: none !important; }
+  #winctl button { font-size: 12.5px; padding: 5px 12px; background: rgba(250,250,252,.85); box-shadow: inset 0 0 0 1px var(--hair); }
+  #hud button { pointer-events: auto; }
+  #hud .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 4px; }
+  #hud #status { font-size: 13px; }
+  #solveinfo { font-size: 13px; }
+  #hudStop { margin-left: auto; padding: 4px 14px; font-size: 12.5px; }
+  #gizmoBar { position: absolute; left: 16px; bottom: 52px; display: flex; gap: 8px; align-items: center; padding: 6px 8px 6px 14px;
+              background: rgba(250,250,252,.85); border-radius: 980px; font-size: 13px; box-shadow: inset 0 0 0 1px var(--hair); }
+  #gizmoBar label { display: inline-flex; gap: 6px; align-items: center; cursor: pointer; }
+  #gizmoBar button { font-size: 12.5px; padding: 4px 12px; }
+  #help { bottom: 16px; padding: 6px 14px; color: var(--muted); font-size: 12px; border-radius: 980px; }
+
+  /* 右侧面板 */
+  #splitter { width: 10px; flex: none; cursor: col-resize; position: relative; background: var(--bg); }
+  #splitter::after { content: ""; position: absolute; left: 4px; top: 16px; bottom: 16px; width: 2px; border-radius: 2px;
+                     background: transparent; transition: background .15s; }
+  #splitter:hover::after, #splitter.drag::after { background: var(--accent); }
+  #panel { width: 380px; min-width: 300px; max-width: 70vw; background: var(--bg); overflow-y: auto; padding: 16px 16px 32px 6px; }
+  .card { background: var(--card); border-radius: var(--radius); padding: 14px 18px; margin-bottom: 12px; }
+  h2 { font-size: 16px; font-weight: 600; letter-spacing: -.015em; margin: 0; padding: 2px 0; cursor: pointer; user-select: none;
+       display: flex; align-items: center; justify-content: space-between; }
+  h2::after { content: "×"; font-size: 20px; font-weight: 400; line-height: 1; color: var(--faint); margin-right: 2px; flex: none; }
+  h2:hover::after { color: var(--text); }
+  .sec { padding-top: 10px; }
+  #panel[hidden], #splitter[hidden] { display: none; }
+  #panel > .card[hidden] { display: none; }
+  /* 最右边一列按钮：点哪个就在左边打开那一节，按点的先后往下排（2026-11-04 用户：避免杂乱） */
+  #dock { width: 96px; flex: none; background: var(--bg); padding: 16px 12px 16px 2px; overflow-y: auto;
+          display: flex; flex-direction: column; gap: 6px; }
+  #dock button { width: 100%; font-size: 12.5px; padding: 8px 4px; background: var(--card); white-space: nowrap; }
+  #dock button.open { background: var(--accent); color: #fff; }
+  #emptyHint { color: var(--muted); font-size: 13px; padding: 16px 4px; }
+  .sec > * + * { margin-top: 8px; }
+
+  /* 按钮：胶囊 */
+  button { font: inherit; font-size: 13px; font-weight: 500; letter-spacing: -.005em; padding: 6px 14px; border: none;
+           background: var(--fill); color: var(--text); border-radius: 980px; cursor: pointer; white-space: nowrap;
+           transition: background .15s, color .15s, box-shadow .15s, transform .08s; }
+  button:hover { background: var(--fill-hover); }
+  button:active { transform: scale(.97); }
+  button:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(0,125,250,.6); }
+  button.primary { background: var(--accent); color: #fff; }
+  button.primary:hover { background: var(--accent-hover); }
+  button.danger { background: #ff3b30; color: #fff; font-weight: 600; }
+  button.danger:hover { background: #ff4f45; }
+  button:disabled { opacity: .4; cursor: default; }
+  button.on { background: var(--bad-soft); color: var(--bad); font-weight: 600; }        /* 跟随、拖动示教开着 */
+  button.touch.on { background: rgba(52,199,89,.15); color: var(--ok); }                   /* 标定：已经碰过记录的角 */
+  button.link { background: none; color: var(--link); padding: 4px 4px; font-weight: 400; }
+  button.link:hover { text-decoration: underline; background: none; }
+  .btns { display: flex; flex-wrap: wrap; gap: 8px; }
+
+  /* 输入框 */
+  input, select { font: inherit; font-size: 13px; color: var(--text); background: #fff; border: 1px solid var(--line);
+                  border-radius: 8px; padding: 4px 8px; outline: none; transition: border-color .15s, box-shadow .15s; }
+  input:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(0,125,250,.25); }
+  input:disabled { opacity: .45; }
+  input[type=number] { width: 64px; text-align: right; font-variant-numeric: tabular-nums; }
+  input[type=range] { width: 150px; vertical-align: middle; accent-color: var(--accent); border: none; padding: 0; box-shadow: none; }
+  select { padding-right: 4px; }
+  label { font-size: 13px; display: inline-flex; align-items: center; gap: 6px; }
+  /* 勾选框 → 开关 */
+  input[type=checkbox] { -webkit-appearance: none; appearance: none; flex: none; width: 34px; height: 20px; margin: 0; padding: 0;
+                         border: none; border-radius: 10px; cursor: pointer; vertical-align: middle;
+                         background: #e9e9eb radial-gradient(circle, #fff 0 7.5px, rgba(0,0,0,.06) 8px, transparent 8.6px) no-repeat;
+                         background-size: 20px 20px; background-position: 0 0; transition: background-color .2s, background-position .2s; }
+  input[type=checkbox]:checked { background-color: var(--green); background-position: 14px 0; }
+  input[type=checkbox]:focus { box-shadow: 0 0 0 3px rgba(52,199,89,.3); }
+  /* 分段控件：一组单选，或者两个互斥的按钮（.pick 是选中的那个） */
+  .seg { display: flex; background: var(--fill); border-radius: 9px; padding: 2px; gap: 2px; }
+  .seg.inline { display: inline-flex; }
+  .seg label { flex: 1; position: relative; display: block; }
+  .seg input { position: absolute; opacity: 0; width: 0; height: 0; pointer-events: none; }
+  .seg span, .seg button { display: block; text-align: center; padding: 4px 8px; border-radius: 7px; font-size: 13px; font-weight: 500;
+                           color: var(--text); background: transparent; cursor: pointer; white-space: nowrap;
+                           transition: background .2s, box-shadow .2s; }
+  .seg button { flex: 1; }
+  .seg span:hover, .seg button:hover { background: rgba(255,255,255,.5); }
+  .seg input:checked + span, .seg button.pick { background: #fff; font-weight: 600;
+                                               box-shadow: 0 1px 3px rgba(0,0,0,.12), 0 0 0 .5px rgba(0,0,0,.04); }
+  .seg input:focus-visible + span { box-shadow: 0 0 0 3px rgba(0,125,250,.5); }
+  /* 一行：左边标签，右边控件 */
+  .field { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .field > .flabel { color: var(--muted); font-size: 13px; min-width: 56px; }
+  .field > .seg:not(.inline) { flex: 1; min-width: 200px; }
+  .grow { flex: 1; min-width: 0; }
+  input.grow { text-align: left; width: auto; }
+  .mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px; word-break: break-all; }
+  .picker { background: var(--row); border-radius: var(--radius-s); padding: 10px 12px; }
+  .picker > * + * { margin-top: 8px; }
+  #dirList { max-height: 220px; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
+  #dirList button { text-align: left; background: #fff; border-radius: 8px; padding: 5px 10px; font-weight: 400; white-space: normal; word-break: break-all; }
+  #dirList button:hover { background: var(--accent-soft); }
+  #ctxmenu { position: fixed; z-index: 50; min-width: 200px; padding: 6px; background: rgba(255,255,255,.97); border-radius: 12px;
+             box-shadow: 0 8px 30px rgba(0,0,0,.18), 0 0 0 1px rgba(0,0,0,.06); display: flex; flex-direction: column; }
+  #ctxmenu[hidden] { display: none; }
+  #ctxmenu .ctxtitle { font-size: 12px; color: var(--muted); padding: 4px 10px 6px; }
+  #ctxmenu button { all: unset; box-sizing: border-box; padding: 7px 10px; border-radius: 7px; font-size: 13.5px; color: var(--text); cursor: pointer; }
+  #ctxmenu button:hover:not([disabled]) { background: var(--accent); color: #fff; }
+  #ctxmenu button[disabled] { color: var(--faint); cursor: default; }
+  #ctxmenu button.danger { color: #ff3b30; }
+  #ctxmenu button.danger:hover { background: #ff3b30; color: #fff; }
+  #ctxmenu hr { border: none; border-top: 1px solid var(--hair); margin: 4px 6px; }
+  .rectoast { border-radius: 980px; padding: 3px 10px; font-size: 12.5px; font-weight: 600; color: #fff; background: #34c759; }
+  .rectoast.bad { background: #ff3b30; }
+  .camwarn { color: #fff; background: #ff9500; border-radius: 980px; padding: 3px 10px; font-size: 12.5px; font-weight: 600; }
+  /* 最近这一次录制的结果（2026-11-09）：录上了绿色＋开头小图＋失败按钮，没录灰色，标了失败红色；一直显示到下一次开始 */
+  .recrun { display: inline-flex; gap: 8px; align-items: center; font-size: 12.5px; font-weight: 600; border-radius: 12px;
+            padding: 3px 4px 3px 4px; background: #e8e8ed; color: #3a3a3c; }
+  .recrun.ok { background: #e3f6e8; color: #1e6b34; }
+  .recrun.bad { background: #fde8e8; color: #a1262b; }
+  .recrun span { padding-left: 4px; }
+  .recrun img { height: 42px; border-radius: 8px; display: block; transform-origin: left top; transition: transform .15s;
+                position: relative; z-index: 5; }
+  .recrun img:hover { transform: scale(3.2); box-shadow: 0 6px 24px rgba(0,0,0,.25); }
+  .recrun img[hidden] { display: none; }
+  .recrun button { font-size: 12px; padding: 3px 10px; }
+  .reccount { border-radius: 980px; padding: 3px 10px; font-size: 12.5px; font-weight: 600; background: #e8e8ed; color: #3a3a3c;
+              font-variant-numeric: tabular-nums; }
+  .reccount.flash { animation: countflash 1.6s ease-out; }
+  @keyframes countflash { 0% { background: #34c759; color: #fff; transform: scale(1.15); } 100% { background: #e8e8ed; color: #3a3a3c; transform: scale(1); } }
+  #hudBad { background: #ff3b30; color: #fff; }
+  .recbadge { color: #fff; background: #ff3b30; border-radius: 980px; padding: 3px 10px; font-size: 12.5px; font-weight: 600;
+              font-variant-numeric: tabular-nums; animation: recblink 1.2s ease-in-out infinite; }
+  @keyframes recblink { 50% { opacity: .55; } }
+  .pill { display: inline-block; padding: 2px 10px; border-radius: 980px; background: var(--row); font-size: 12.5px; font-weight: 500;
+          font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+  /* 模式标签（也是切换按钮） */
+  .mode { font-weight: 600; font-size: 12.5px; padding: 4px 12px; border-radius: 980px; }
+  .mode.sim { background: var(--accent-soft); color: var(--accent); }
+  .mode.real { background: var(--bad-soft); color: var(--bad); }
+  button.mode:hover { filter: brightness(.96); }
+
+  .ok { color: var(--ok); } .bad { color: var(--bad); } .warn { color: var(--warn); } .muted { color: var(--muted); }
+  #target { font-variant-numeric: tabular-nums; }
+
+  /* 说明（长的灰字收起来，点“说明”展开） */
+  details.tip > summary { list-style: none; cursor: pointer; color: var(--link); font-size: 12.5px; display: inline-block; user-select: none; }
+  details.tip > summary::-webkit-details-marker { display: none; }
+  details.tip > summary::after { content: " ›"; display: inline-block; transition: transform .2s; }
+  details.tip[open] > summary::after { transform: rotate(90deg); }
+  details.tip > div { color: var(--muted); font-size: 12.5px; line-height: 1.6; margin-top: 6px; padding: 10px 12px;
+                      background: var(--row); border-radius: var(--radius-s); }
+
+  /* 关键帧 */
+  #kflist { list-style: none; padding: 0; margin: 4px 0 0; }
+  #actlist { list-style: none; padding: 0; margin: 4px 0 0; }
+  #actlist li { border-radius: var(--radius-s); padding: 8px 12px; margin-bottom: 6px; cursor: pointer; background: var(--row); font-size: 12.5px; }
+  #actlist li:hover { background: var(--row-hover); }
+  #actlist li.sel { background: #fff; box-shadow: inset 0 0 0 2px var(--accent); }
+  #actlist li .top { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+  #actlist li .top b { font-weight: 600; font-size: 13px; }
+  #actlist li .row { color: var(--muted); font-variant-numeric: tabular-nums; margin-top: 2px; }
+  #kflist li { border-radius: var(--radius-s); padding: 9px 12px; margin-bottom: 6px; cursor: pointer; background: var(--row);
+               transition: box-shadow .15s, background .15s; }
+  #kflist li:hover { background: var(--row-hover); }
+  #kflist li.sel { background: #fff; box-shadow: inset 0 0 0 2px var(--accent); }
+  #kflist li .top { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+  #kflist li .top b { font-weight: 600; }
+  #kflist li .top .muted { font-size: 12px; font-variant-numeric: tabular-nums; }
+  #kflist li .sub { display: flex; flex-wrap: wrap; gap: 6px 12px; margin-top: 6px; align-items: center; font-size: 12.5px; }
+  #kflist li .sub button { font-size: 12px; padding: 3px 10px; background: #fff; color: var(--link); box-shadow: inset 0 0 0 1px var(--line); }
+  #kflist li .sub button:hover { background: var(--accent-soft); }
+  #kflist select, #kflist input { font-size: 12.5px; padding: 2px 6px; }
+  #kflist input { width: 52px; }
+
+  #problems { margin: 6px 0; padding-left: 18px; font-size: 12.5px; }
+  #progress { height: 4px; background: var(--fill); border-radius: 2px; overflow: hidden; }
+  #progress div { height: 100%; width: 0; background: var(--accent); border-radius: 2px; transition: width .1s; }
+  .tpl { display: flex; gap: 8px; }
+  .tpl input, .tpl select { flex: 1; min-width: 0; text-align: left; width: auto; }
+  .range { display: flex; align-items: center; gap: 10px; font-size: 13px; }
+  .range > span:first-child { width: 64px; color: var(--muted); }
+  .range input { flex: 1; }
+  .range > span:last-child { width: 72px; text-align: right; font-variant-numeric: tabular-nums; }
+
+  /* 普通一行（标签 + 控件），放不下就换行 */
+  .jrow { display: flex; align-items: center; gap: 6px 10px; flex-wrap: wrap; font-size: 13px; }
+  /* 关节（逐个调） */
+  #joints .jrow { flex-wrap: nowrap; gap: 6px; margin: 4px 0; }
+  #joints .jrow b { width: 26px; font-weight: 600; color: var(--muted); flex: none; }
+  #joints .jrow input { width: 72px; }
+  #joints .jrow button { width: 28px; height: 28px; padding: 0; border-radius: 50%; font-size: 15px; line-height: 28px; flex: none; }
+  #joints .jrow .muted { font-size: 11.5px; color: var(--faint); }
+
+  /* 手臂摆法 */
+  #branches button { display: block; width: 100%; text-align: left; margin: 0 0 6px; font-size: 13px; font-weight: 400; white-space: normal;
+                     background: var(--row); border-radius: var(--radius-s); padding: 8px 12px; }
+  #branches button:hover { background: var(--row-hover); }
+  #branches button.sel { background: #fff; box-shadow: inset 0 0 0 2px var(--accent); font-weight: 600; }
+  #branches button.badb { color: var(--bad); }
+  #branches button .muted { font-weight: 400; }
+  /* 第三视角相机画面：点一下放大盖住三维视图，再点缩回 */
+  #camBox { position: relative; width: 100%; aspect-ratio: 4 / 3; background: #111; border-radius: var(--radius-s); overflow: hidden; cursor: zoom-in; }
+  #camBox img { width: 100%; height: 100%; object-fit: contain; display: block; }
+  #camBox .cross { position: absolute; background: rgba(255, 255, 255, 0.55); pointer-events: none; }
+  #camBox .cross.h { left: 0; right: 0; top: 50%; height: 1px; }
+  #camBox .cross.v { top: 0; bottom: 0; left: 50%; width: 1px; }
+  #camBox.big { position: fixed; left: 16px; top: 16px; width: min(calc(100vw - 480px), calc((100vh - 32px) * 4 / 3)); z-index: 50; cursor: zoom-out;
+                box-shadow: 0 10px 40px rgba(0, 0, 0, 0.35); }
+</style>
+<script type="importmap">{ "imports": { "three": "./vendor/three.module.js" } }</script>
+</head>
+<body>
+<div id="app">
+  <div id="view">
+    <div id="hud">
+      <div class="row"><button id="mode" class="mode" title="点击切换仿真 / 真实模式">连接中…</button><span id="status" class="muted"></span>
+        <span id="recBadge" class="recbadge" hidden>● 录制中</span>
+        <span id="camWarn" class="camwarn" hidden></span>
+        <span id="recCount" class="reccount" hidden title="存储路径里现在有几条示范（_废弃 里的不算）">已录 0 条</span>
+        <span id="recRun" class="recrun" hidden><img id="recThumb" alt="" title="这一条开头的第三视角画面"><span id="recRunText"></span>
+          <button id="hudBad" title="这条没做成：挪进存储路径里的 _废弃 文件夹，不算进数据集，下一条还用这个编号">失败</button></span>
+        <span id="recToast" class="rectoast" hidden></span>
+        <button id="hudStop" class="danger" title="和“机械臂”那一节的急停一样">急停</button></div>
+      <div id="solveinfo" class="muted">拖动夹爪上的控件；模型显示机械臂会摆成什么样</div>
+    </div>
+    <div id="winctl" hidden>
+      <button id="winFull" title="全屏 / 窗口（和按 F11 一样）">窗口</button>
+      <button id="winMin" title="最小化（点任务栏里的 Firefox 回来）">最小化</button>
+    </div>
+    <div id="gizmoBar">
+      <label title="开着时：拖动控件只能平移（x y z）和绕竖直轴转（旋转控件只剩水平那一圈），夹爪始终竖直朝下；打开时会把夹爪先摆成竖直朝下（转向不变）。关掉就和原来一样六个方向都能调"><input id="vertLock" type="checkbox"> 竖直抓（只调 xyz 和转向）</label>
+      <button id="yawL" title="从上往下看，夹爪逆时针转：点一下 5°，按住一直转（30°/s）；按住 Shift 时 1° / 5°/s；真机跟着转。快捷键 E">⟲ 逆时针（E）</button>
+      <button id="yawR" title="从上往下看，夹爪顺时针转：点一下 5°，按住一直转（30°/s）；按住 Shift 时 1° / 5°/s；真机跟着转。快捷键 Q">顺时针 ⟳（Q）</button>
+    </div>
+    <div id="help">鼠标左键转视角、右键拖动平移、滚轮缩放 · W/S 沿初始位姿朝向前后、A/D 左右（世界坐标，不随视角变）· R/F 上下 · Q 顺时针 / E 逆时针转夹爪（按一下一小步、按住一直动，Shift 慢；真机跟着动） · 1 真夹爪开 / 合 · 2 生成关键帧并执行 · 空格 真机移到目标（动着时按＝停止） · 右键点一下 菜单</div>
+  </div>
+  <div id="splitter" title="拖动调整右侧面板宽度"></div>
+  <div id="panel">
+    <h2>相机画面</h2>
+    <div class="seg"><label><input type="radio" name="camWhich" value="scene" checked><span>第三视角</span></label>
+      <label><input type="radio" name="camWhich" value="wrist"><span>腕部</span></label></div>
+    <div id="camBox" title="点画面放大 / 缩回">
+      <img id="camImg" alt="">
+      <div class="cross h"></div><div class="cross v"></div>
+    </div>
+    <div class="jrow"><label><input id="camLive" type="checkbox" checked> 实时刷新</label>
+      <label title="黄线：夹爪竖直抓方块够得着的范围（摆方块、盘子都放在里面）；字母是分区，每条换一格摆；红色：初始位姿时手臂挡住、相机看不见；白线：两张桌子的接缝"><input id="camZones" type="checkbox"> 显示工作区</label>
+      <span id="camInfo" class="muted">打开这一节就开始刷新</span></div>
+    <div class="muted" style="font-size:12px">调相机位置用：机械臂常干活的区域（底座前方约 25~65 cm、左右各 40 cm）整块要在画面里，夹爪也要在画面里；斜着往下看（约 45°）最好，夹具夹牢，标定完就别再动</div>
+    <h2>相机外参标定</h2>
+    <div id="calibInfo" class="muted" style="font-size:12.5px">—</div>
+    <div class="muted" style="font-size:12px">① 棋盘格平放在桌上、机械臂够得着的地方，尽量放在画面中间（离夹爪近、看起来大一点更准），机械臂先挪开别挡住，点“识别棋盘格”（要几秒，画面上会标出 1~4 号角）；
+      ② 夹爪合上、竖直朝下，用拖动示教把合拢的指尖依次碰到 1~4 号角，<b>指尖中心</b>正对角点，每碰一个点一下对应的“记录”；
+      ③ 关掉拖动示教，让机械臂整个在画面里、停着不动，点“计算外参”（会再用点云里的机械臂和模型对一遍精修）。相机挪过就要重标；
+      只是轻轻碰了一下相机，可以直接点“用机械臂精修”</div>
+    <div class="btns"><button id="boardFind">识别棋盘格</button><button id="boardCalib">计算外参</button><button id="calibRefine" title="不用棋盘格：拿点云里的机械臂和模型对一遍，修正现在的外参">用机械臂精修</button></div>
+    <div class="btns"><button class="touch" data-l="①">记录 1</button><button class="touch" data-l="②">记录 2</button>
+      <button class="touch" data-l="③">记录 3</button><button class="touch" data-l="④">记录 4</button></div>
+    <div id="calibMsg" class="muted" style="font-size:12.5px"></div>
+    <h2>点云抓取</h2>
+    <div class="jrow"><button id="cloudGet">刷新点云</button>
+      <label><input id="cloudLive" type="checkbox"> 每 2 秒刷新</label><label><input id="cloudShow" type="checkbox" checked> 显示点云</label></div>
+    <div class="field"><span class="flabel">点一下</span><div class="seg">
+      <label title="点物体：自动框出来、生成抓取姿态"><input type="radio" name="pickMode" value="auto" checked><span>自动框选物体</span></label>
+      <label title="点哪抓取中心就放到哪，夹爪方向不变"><input type="radio" name="pickMode" value="manual"><span>手动选位置</span></label></div></div>
+    <div class="field"><span class="flabel">夹法</span><div class="seg">
+      <label><input type="radio" name="graspMode" value="vertical" checked><span>垂直夹（从上往下）</span></label>
+      <label><input type="radio" name="graspMode" value="horizontal"><span>水平夹（从侧面）</span></label></div></div>
+    <div class="range" title="框选物体时颜色要多接近才算同一个物体：框把旁边的东西带进来了就调小，物体只框到一部分（比如有花纹、有阴影）就调大；0 = 不看颜色、只按形状">
+      <span>颜色容差</span><input id="segTol" type="range" autocomplete="off" min="0" max="80" step="5" value="40"><span id="segTolVal">40</span></div>
+    <div class="btns"><button id="graspRegen">按抓取中心重新生成姿态</button><button id="graspKeep">保持方向换摆法</button></div>
+    <div id="cloudInfo" class="muted" style="font-size:12.5px">先标定外参，再点“刷新点云”</div>
+    <div class="muted" style="font-size:12px">自动：在点云里点一下物体，程序去掉桌面、框出物体（橙色框），把目标（抓取中心）放到合适的地方并摆好姿态；
+      拖目标调抓取中心后点“按抓取中心重新生成姿态”。手动：点哪就把抓取中心放到哪，夹爪方向不变，自动换一种能到的手臂摆法。
+      满意了就点“设为抓取点”</div>
+    <h2>目标（夹爪抓取中心）</h2>
+    <div id="target" class="muted">—</div>
+    <div class="btns">
+      <button id="toTarget" class="primary" title="真机移到目标（灰色模型现在的位置和手臂摆法），夹爪不动。夹爪朝下时和录的示范一样：先到目标正上方（路上手腕不拧）、原地转到目标方向、再竖直下去。快捷键 空格（M 也行）">真机移到这里（空格）</button>
+      <button id="toActual" title="把拖动控件放回机械臂现在的实际位置">回到实际位置</button>
+      <button id="toHome">放到初始位姿</button>
+      <button id="modeBtn">切换：旋转</button>
+      <button id="alignOut" title="位置和倾斜角不变，只绕竖直轴转夹爪，找一个预抓取、抓取、抬起都能到、手腕离奇异够远的方向（水平、斜着抓时用）">夹爪朝外摆正</button>
+    </div>
+    <div class="field"><span class="flabel">仿真夹爪</span><span class="seg inline"><button id="simOpen">张开</button><button id="simClose">合上</button></span>
+      <button id="simFromReal" class="link" title="仿真夹爪摆成和真夹爪现在一样（拖动示教时用真夹爪夹好了，再记录关键帧）">跟真夹爪一样</button></div>
+    <div class="muted" style="font-size:12px">只开合网页里的灰色模型，不动真夹爪；记录关键帧时，夹爪那一栏按它自动填。真夹爪在下面“机械臂”那一节单独开合</div>
+
+    <h2>手臂摆法</h2>
+    <div id="branches" class="muted" style="font-size:13px">—</div>
+    <div class="muted" style="font-size:12px">同一个目标位置，手臂可以有几种摆法。点一下切换，模型会换成那种摆法；记录关键帧时按当前选中的摆法记</div>
+
+    <h2>关节（逐个调）</h2>
+    <div id="joints"></div>
+    <div class="muted" style="font-size:12px">点 −/+ 每次 1°，按住 Shift 点每次 5°，也可以直接填数。用关节调出来的手臂摆法，记录关键帧时会一起记下，执行时按这种摆法走</div>
+
+    <h2>自动生成抓放</h2>
+    <div class="jrow"><label>轨迹方式 <select id="autoMode"><option value="plate">放盘子 / 普通抓放</option><option value="stack">叠方块</option></select></label></div>
+    <div id="stackHelp" class="muted" hidden>设好上块的竖直抓取点。手动放置时把夹爪目标摆到松爪位置并对准底块边缘，再点“设为放置点”。也可右键点云顶面，选“设为叠放底块”。</div>
+    <div class="muted" style="font-size:12px">把目标拖到要抓的位置、调好夹爪方向和手臂摆法，点“设为抓取点”；再拖到放的位置点“设为放置点”。
+      然后自动补齐：[初始位姿 →] 预抓取（沿夹爪方向退后）→ 伸进去合夹爪 → 抬起 → 移到放置点上方 → 放下张开 → 沿夹爪方向撤出 [→ 初始位姿]。录制只录到撤出，回初始那段照样执行（复位下一条）但不录。<br>
+      要连着做几次抓放（比如两块都放进盒子），点“＋ 添加动作”，再给新动作设抓取点和放置点；点列表里的某个动作，就能重新设它的抓取点、放置点。
+      几个动作时只有第 1 个从初始位姿出发、最后一个做完才回初始位姿，中间撤出后停一下直接去下一个的预抓取；每个动作单独生成、单独调整，互不牵连</div>
+    <ul id="actlist"></ul>
+    <div class="btns">
+      <button id="setPick">设为抓取点</button><button id="setPlace">设为放置点</button><button id="actAdd">＋ 添加动作</button>
+    </div>
+    <div class="jrow"><label>伸进 / 撤出距离 <input id="apDist" type="number" min="2" max="20" step="1" value="8"> cm</label></div>
+    <div id="stackAlignRow" class="jrow" hidden><label>放置对齐高度 <input id="stackAlignHeight" type="number" min="5" max="20" step="0.5" value="8"> cm</label>
+      <span class="muted">相对松爪位置。用腕部画面确认此高度能看清底块。</span></div>
+    <div class="jrow"><label>抬起高度 <input id="liftH" type="number" min="2" max="30" step="1" value="10"> cm</label></div>
+    <div class="jrow"><label><input id="checkClose" type="checkbox"> 按物体宽度检查合上时的指尖</label><label>物体宽度 <input id="objW" type="number" min="0" max="8.5" step="0.5" value="4" disabled> cm</label></div>
+    <div class="muted" style="font-size:12px">默认不勾：抓取点、放置点以你摆的为准（只检查张开时指尖离桌 3 mm、手臂离桌 1 cm）。
+      不管勾不勾，夹着东西的时候都不能比抓取的位置低（物体底下就是桌面，再往下会把它压在桌面上），放置点低于抓取点会标红。
+      勾上后，程序再帮你算合上那一下指尖往下伸多少（这款夹爪是连杆式，越合指尖越往下：夹 4 cm 宽的东西多伸 2.4 cm、6 cm 1.7 cm、8 cm 0.6 cm，空夹全合 2.95 cm；填 0 按空夹全合）</div>
+    <div class="jrow"><label><input id="startHome" type="checkbox" checked> 从初始位姿出发</label><label><input id="backHome" type="checkbox" checked> 最后回到初始位姿</label>
+      <label title="先走到方块正上方（夹爪方向只跟着底座转、途中不转），停住后原地转夹爪对齐方块，再竖直下降抓。对齐角度在方块转 90° 一样的四个角度里挑离原方向最近的（最多转 45°），同一个方块角度总是同一个夹爪角度。夹爪大致竖直朝下时才这样做"><input id="hoverAlign" type="checkbox" checked> 到方块上方再转夹爪</label>
+      <label title="不勾（默认，放盘子）：放的时候夹爪跟着手臂转，和抓的时候 J6 一样，搬运途中手腕不拧；放置点存的夹爪方向不管（盘子不动、换方块重设抓取点也不会拧）。勾上（叠方块、放进盒子要对齐）：按放置点存的方向放，方块转 90° 一样，挑搬运途中手腕转得最少的那个（最多 45°）。夹爪大致竖直朝下时才管"><input id="placeAlign" type="checkbox"> 放的时候对齐放置点的方向</label></div>
+    <div class="btns"><button id="genKf" class="primary">生成关键帧并预览</button>
+      <button id="genExec" title="生成关键帧、验证通过后直接真机执行（录制开着就录成一条），不播预览动画；轨迹有问题就不执行。快捷键 2">生成关键帧并执行（2）</button></div>
+
+    <h2>关键帧</h2>
+    <div class="btns">
+      <button id="kfAdd" class="primary">＋ 记录当前目标</button>
+      <button id="kfUpdate">用当前目标更新所选</button>
+    </div>
+    <div class="btns">
+      <button id="kfUp">上移</button><button id="kfDown">下移</button>
+      <button id="kfDel">删除所选</button><button id="kfClear">清空</button>
+    </div>
+    <div class="jrow"><label><input id="gotoGrip" type="checkbox" checked> “真机移到这帧”时，到了以后真夹爪也按这一帧开合</label></div>
+    <ul id="kflist"></ul>
+    <div class="muted" style="font-size:12px">夹爪开合在到达这一帧时执行；记录时按仿真夹爪自动填（和上一帧时一样就填“不变”，第 1 帧总是写明），也可以在这里改。
+      停顿是到达后原地等几秒（自动生成里合夹爪后停 0.6 秒、松手后停 0.35 秒：夹爪速度调成 50 后合到底约 0.5~0.6 秒，夹 3.3 cm 方块约 0.45 秒；多停的静止帧转换时会裁掉）。“真机移到这帧”（和空格一样）：夹爪朝下时先关节运动到这一帧正上方（路上手腕不拧），原地转到这一帧的方向、再竖直下去；离得很近或夹爪不朝下就直接过去（路径不经过预览，途中逐点检查、限速，能停能急停），用来核对某一帧或者从某一帧接着试</div>
+
+    <h2>速度</h2>
+    <div class="range"><span>平移</span><input id="speed" type="range" autocomplete="off" min="1" max="25" step="1" value="15"><span><span id="speedVal"></span> cm/s</span></div>
+    <div class="range" title="夹爪开合前后 5 cm 以内（伸进去夹、刚夹起、放下前、刚松开）的平移速度"><span>接近/离开</span><input id="precise" type="range" autocomplete="off" min="1" max="10" step="0.5" value="7"><span><span id="preciseVal"></span> cm/s</span></div>
+    <div class="range"><span>转动</span><input id="ang" type="range" autocomplete="off" min="5" max="57" step="1" value="30"><span><span id="angVal"></span> °/s</span></div>
+    <div class="range" title="每次执行时第 1 帧（一般是初始位姿）的每个关节随机偏一点：标准差这么多度，最多 2 倍"><span>起点扰动</span><input id="startNoise" type="range" autocomplete="off" min="0" max="2" step="0.25" value="1"><span>±<span id="startNoiseVal"></span>°</span></div>
+    <div class="range" title="执行时让机械臂沿轨迹慢慢晃一点（均方根这么多毫米），录进数据的动作仍是干净轨迹；抓、放的那一下不晃"><span>执行扰动</span><input id="execNoise" type="range" autocomplete="off" min="0" max="8" step="1" value="3"><span><span id="execNoiseVal"></span> mm</span></div>
+    <div class="range" title="不建议：会让示范动作不一致（见说明）"><span>人为扰动</span><input id="human" type="range" autocomplete="off" min="0" max="100" step="5" value="0"><span><span id="humanVal">0</span> %</span></div>
+    <div class="muted" style="font-size:12px">关键帧之间走直线，中间帧处圆角拐过去（不会冲过头）。“平移”是自由移动时的最快速度；夹爪真要开合的那一帧前后 5 cm 以内（伸进去夹、刚夹起、放下前、刚松开）
+      按“接近/离开”的速度慢慢走——精细的地方慢、空中移动快（DemoSpeedup，CoRL 2025：整条均匀加快成功率掉一半，只加快空中那段就不掉）。夹爪本来就是那个状态的开合指令（比如预抓取写了张开、夹爪本来就开着）当没写，不在那里停。
+      起停按 S 形加减速，关节转得快的地方自动放慢。<br>
+      起点扰动（默认 1°）：每次执行时，第 1 帧（一般是初始位姿）的每个关节随机偏一点（正态分布，标准差这么多度，最多 2 倍），每条示范的起点略有不同，
+      和 LIBERO 一样（初始关节加约 1° 的随机噪声；1° 时抓取中心起点平均偏约 1 cm、最多约 2.7 cm，姿态平均差约 2°）；这是改“状态”，示范动作本身照样一致。预览和执行是同一个起点，“换一种”换一组；第 1 帧没带关节角时不扰动，0 关掉。<br>
+      执行扰动（默认 3 mm）：执行时发给机械臂的是“规划轨迹＋慢慢晃的偏移”（每秒晃 0.15~0.6 次，均方根这么多毫米），录进数据的动作仍是规划的干净值，
+      数据里就有“偏了一点再被拉回轨迹”的样子（MimicGen CoRL 2023：执行时加小噪声，去掉的话学出来的策略最多掉 40%；
+      Data Quality in IL NeurIPS 2023：执行有扰动、示范照常纠正能提高鲁棒性，动作本身带噪声才有害）。离夹爪开合点 2 cm 以内渐渐收掉，抓、放那一下是准的；
+      开头和录制结束前也渐渐加上 / 收掉，回初始那段不加；加了以后每个点都重新做安全检查，不安全的地方附近不加。预览画的是干净轨迹，0 关掉。<br>
+      人为扰动（不建议，默认 0）：帧与帧之间路径随机鼓一点、姿态晃一点、快慢不均、夹爪动作前犹豫一下。这是在示范动作本身上加噪声，会让示范不一致、降低成功率
+      （robomimic CoRL 2021、Data Quality in IL NeurIPS 2023）；想让每条不一样，改物体摆放和起点</div>
+
+    <h2>预览与执行</h2>
+    <div class="btns">
+      <button id="preview" class="primary">预览轨迹</button>
+      <button id="reroll" title="起点扰动和人为扰动换一组随机数，重新预览">换一种</button>
+      <button id="execute">真机执行</button>
+      <button id="stop">停止</button>
+    </div>
+    <div id="progress"><div></div></div>
+    <div id="planinfo" class="muted">先预览，确认没问题再执行。轨迹从第 1 帧开始；想从机械臂现在的位置出发，就点“回到实际位置”再记录成第 1 帧</div>
+    <ul id="problems"></ul>
+
+    <h2>模型控制</h2>
+    <div class="field"><span class="flabel">模型服务</span><input id="polAddr" class="grow" spellcheck="false" value="172.16.230.65:8100"></div>
+    <div class="field"><span class="flabel">任务描述</span><input id="polTask" class="grow" spellcheck="false" value="put the red cube on the plate"></div>
+    <div class="range" title="模型一次给 15 步（1 秒）动作，执行这么多步就拿新画面再问一次（越小越跟得上画面，越大越平滑）"><span>执行几步再问</span><input id="polReplan" type="range" autocomplete="off" min="2" max="15" step="1" value="8"><span><span id="polReplanVal"></span> 步</span></div>
+    <div class="range" title="跑到这么久自动停（示范一条约 12~18 秒）"><span>最长时间</span><input id="polMax" type="range" autocomplete="off" min="10" max="90" step="5" value="40"><span><span id="polMaxVal"></span> 秒</span></div>
+    <div class="btns"><button id="polRaw" title="开着时去掉工作范围框、高度下限、目标跳太远就停、夹空就停，关节限速放宽到 90 °/s；防撞桌、防自撞、关节限位照样管。每次打开网页都是关的">解除限制：关</button></div>
+    <div class="btns"><button id="polTest" title="连一下模型服务、用现在的画面问一次，机械臂不动">测试连接</button>
+      <button id="polStart" class="primary">开始（模型控制）</button><button id="polStop">停止</button></div>
+    <div id="polInfo" class="muted" style="font-size:12.5px">—</div>
+    <div class="muted" style="font-size:12px">台式机（172.16.230.65）上跑着 π0.5 模型服务（bash ~/libw/eco65/serve.sh），这里每隔几步把两路相机画面、关节角、夹爪开口和任务描述发过去，
+      拿回接下来 1 秒的动作（6 个关节角＋夹爪开合），按 50 Hz 发给机械臂。图像处理和训练时完全一样；发出去的每个关节角都过一遍和执行轨迹一样的安全检查
+      （限位、自碰撞、离桌面、法兰离底座、抓取中心不出工作范围），关节最快 45 °/s（仿真 90），跟不上指令、读不到状态、相机没画面、模型服务没回应就停在原地。
+      用法：先“回初始位姿”（训练时每条都从初始位姿出发、夹爪张开），把方块和盘子摆在工作区里，点“开始”；空格 / “停止” / 急停都能停。
+      先在仿真模式下点一次看看动作对不对（真机不动、示教器里的模型动），再切真实模式。每次运行的日志在 ~/teleop/logs/policy_时间/（每拍的指令和实际关节角、每段动作、送给模型的图）</div>
+
+    <h2>录制数据</h2>
+    <div class="jrow"><label><input id="recOn" type="checkbox"> 点“真机执行”时录成一条示范</label></div>
+    <div class="field"><span class="flabel">存储路径</span><input id="recFolder" class="grow" spellcheck="false" placeholder="~/teleop/data/demos">
+      <button id="recBrowse">浏览…</button></div>
+    <div id="dirPicker" class="picker" hidden>
+      <div class="field"><button id="dirUp" title="上一级">‹ 上一级</button><span id="dirPath" class="grow mono"></span></div>
+      <div id="dirList"></div>
+      <div id="dirMsg" class="muted" style="font-size:12px"></div>
+      <div class="btns"><button id="dirNew">新建文件夹</button><button id="dirPick" class="primary">用这个文件夹</button><button id="dirCancel">取消</button></div>
+    </div>
+    <div id="recInfo" class="muted" style="font-size:12.5px">—</div>
+    <div class="field"><span class="flabel">任务描述</span><input id="recTask" class="grow" placeholder="比如 pick up the red cube and put it on the plate"></div>
+    <div class="jrow"><label><input id="recDepth" type="checkbox"> 同时存深度图（每条大约多 100 MB）</label></div>
+    <div class="btns"><button id="recManual" title="不执行轨迹也能录：开着跟随、拖动示教时手动开始 / 停止">手动开始录</button>
+      <button id="recDiscard" title="刚录的那一条没做成：挪进存储路径里的 _废弃 文件夹，不算进数据集，下一条还用这个编号。存下时默认就算成功，做成了不用点">刚录的那条失败</button></div>
+    <div id="recMsg" class="muted" style="font-size:12.5px"></div>
+    <div class="muted" style="font-size:12px">打开“执行时录制”后，每点一次“真机执行”录一条：先用关节运动走到第 1 帧、停稳了才开始录，录到最后一个不是“回初始”的帧（放下后撤出）停稳为止，
+      回初始那段照样执行但不录（和 LIBERO 一样：从初始姿态开始，任务完成就结束）；只认自动生成的“回初始”帧，自己记的帧都会录进去。中途停了、急停了这一条不存。
+      每条存成一个 HDF5（episode_000000.hdf5 …），15 帧/秒：第三视角和腕部两台相机的彩色图（JPEG）、实际关节角（弧度）、夹爪开口（0 合 ~ 1 开）、法兰位姿、
+      当时发的指令关节角和夹爪指令（action），还有任务描述。任务描述是以后给模型的指令，同一个任务每条写一样的（英文最好）。
+      抓偏了、掉了就点“删除刚录的那条”。存储路径填 Orin 上的路径（可以是插在 Orin 上的 U 盘、移动硬盘），没有的文件夹录第一条时自动建</div>
+
+    <h2>机械臂</h2>
+    <div class="btns">
+      <button id="estop" class="danger">急停</button>
+      <button id="release">解除急停</button>
+      <button id="home">回初始位姿</button>
+      <button id="setHome" title="用手（拖动示教）把机械臂摆成顺手的姿态，点这里存成初始位姿：回初始位姿、自动生成的“从初始位姿出发/回初始”都用它">把现在的姿态设为初始位姿</button>
+    </div>
+    <div class="field"><span class="flabel">真实夹爪</span><span id="realGripState" class="pill">—</span></div>
+    <div class="btns">
+      <button id="gripOpen">张开</button><button id="gripClose">合上</button><button id="gripRestart">重启夹爪</button>
+    </div>
+    <div class="btns">
+      <button id="follow">跟随模式：关</button>
+      <button id="drag">拖动示教：关</button>
+    </div>
+    <div id="followinfo" class="muted" style="font-size:12px">打开后，拖目标或调关节时机械臂会实时（限速）跟过去；每一步都做安全检查，过不去就停在原地</div>
+
+    <h2>模板</h2>
+    <div class="tpl"><input id="tplName" placeholder="模板名，比如 pick_bottle"><button id="tplSave">保存</button></div>
+    <div class="tpl"><select id="tplList"></select><button id="tplLoad">载入</button><button id="tplRefresh">刷新</button></div>
+  </div>
+  <div id="dock" title="点一下打开 / 关掉那一节"></div>
+</div>
+<script type="module" src="./app.js?v=20261117-home"></script>
+</body>
+</html>

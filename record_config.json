@@ -1,0 +1,6 @@
+{
+ "folder": "/home/whut/teleop/data/stack",
+ "task": "stack the red cube on the green cube",
+ "depth": false,
+ "on": true
+}

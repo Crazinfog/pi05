@@ -1,0 +1,8 @@
+# 示范数据与运行日志不入库
+data/
+logs/
+Log/
+__pycache__/
+*.hdf5
+*.pyc
+*.pid

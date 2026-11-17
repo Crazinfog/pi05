@@ -1,0 +1,5 @@
+#!/bin/bash
+# 命令行演示入口：./demo red（./demo --help 看全部用法）。程序本体是同目录的 demo_cli.py
+DIR=$(cd "$(dirname "$0")" && pwd)
+cd "$DIR" || exit 1
+exec "${TELEOP_PY:-$HOME/miniforge3/envs/teleop/bin/python}" -c "import sys; sys.path.insert(0, '$DIR'); import demo_cli; demo_cli.main()" "$@"
